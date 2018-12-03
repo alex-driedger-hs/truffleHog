@@ -69,8 +69,8 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
-HEX_CHARS = "1234567890abcdefABCDEF"
+BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-"
+HEX_CHARS = "1234567890abcdefABCDEF-"
 
 def del_rw(action, name, exc):
     os.chmod(name, stat.S_IWRITE)
@@ -117,9 +117,9 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-def clone_git_repo(git_url):
+def clone_git_repo(git_url, max_depth):
     project_path = tempfile.mkdtemp()
-    Repo.clone_from(git_url, project_path)
+    Repo.clone_from(git_url, project_path, depth=max_depth)
     return project_path
 
 def print_results(printJson, issue):
@@ -167,6 +167,7 @@ def find_entropy(printableDiff, commit_time, branch_name, prev_commit, blob, com
             hex_strings = get_strings_of_set(word, HEX_CHARS)
             for string in base64_strings:
                 b64Entropy = shannon_entropy(string, BASE64_CHARS)
+                # print(string, " : ", b64Entropy)
                 if b64Entropy > 4.5:
                     stringsFound.append(string)
                     printableDiff = printableDiff.replace(string, bcolors.WARNING + string + bcolors.ENDC)
@@ -243,22 +244,27 @@ def handle_results(output, output_dir, foundIssues):
     return output
 
 def find_strings(git_url, since_commit=None, max_depth=1000000, printJson=False, do_regex=False, do_entropy=True, surpress_output=True, custom_regexes={}, branch=None):
+    # print("Starting find_strings")
     output = {"foundIssues": []}
-    project_path = clone_git_repo(git_url)
+    # print("Cloning repo")
+    project_path = clone_git_repo(git_url, max_depth)
     repo = Repo(project_path)
     already_searched = set()
     output_dir = tempfile.mkdtemp()
 
+    # print("Getting branch")
     if branch:
         branches = repo.remotes.origin.fetch(branch)
     else:
         branches = repo.remotes.origin.fetch()
 
     for remote_branch in branches:
+        # print("Current branch: ", remote_branch)
         since_commit_reached = False
         branch_name = remote_branch.name
         prev_commit = None
         for curr_commit in repo.iter_commits(branch_name, max_count=max_depth):
+            # print("Current commit: ", curr_commit)
             commitHash = curr_commit.hexsha
             if commitHash == since_commit:
                 since_commit_reached = True
@@ -279,6 +285,7 @@ def find_strings(git_url, since_commit=None, max_depth=1000000, printJson=False,
                 diff = prev_commit.diff(curr_commit, create_patch=True)
             # avoid searching the same diffs
             already_searched.add(diff_hash)
+            # print("Finding secrets")
             foundIssues = diff_worker(diff, curr_commit, prev_commit, branch_name, commitHash, custom_regexes, do_entropy, do_regex, printJson, surpress_output)
             output = handle_results(output, output_dir, foundIssues)
             prev_commit = curr_commit
